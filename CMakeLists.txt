@@ -1,478 +1,230 @@
-# If you want built-in precompiled header support
-# then make sure you have cmake 3.16 or higher.
+# **********************************************************************
 #
-# Minimum required is 3.15 due to use of multiple values in
-# generator expressions.
-cmake_minimum_required( VERSION 3.15 )
+#  Audacity: A Digital Audio Editor
+#
+# **********************************************************************
 
-# If building with GNU compiler, then must be 4.9 or later.
-if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
-    CMAKE_CXX_COMPILER_VERSION VERSION_LESS "4.9")
-   message(FATAL_ERROR "Audacity requires at least GCC 4.9")
-endif ()
+cmake_minimum_required(VERSION 3.24)
 
-# We only do alpha builds, beta builds, and release versions.
-# Most of the time we're in development, so AUDACITY_BUILD_LEVEL should be
-# defined to 0.
-# Its value may be more than 0 for pre-release "Beta" builds that differ only
-# in the welcome screen, and hiding of some development menu commands, but
-# still link to the alpha manual online.
+cmake_policy(SET CMP0091 OLD) # not set MSVC default args
 
-# Set this value to 0 for alpha, 1 for beta, 2 for release builds
-set( AUDACITY_BUILD_LEVEL 0 )
+project(audacity LANGUAGES C CXX)
 
-# The Audacity version
-# Increment as appropriate after release of a new version, and set back
-# AUDACITY_BUILD_LEVEL to 0
-set( AUDACITY_VERSION 3 )
-set( AUDACITY_RELEASE 0 )
-set( AUDACITY_REVISION 3 )
-set( AUDACITY_MODLEVEL 0 )
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-string( TIMESTAMP __TDATE__ "%Y%m%d" )
-if( AUDACITY_BUILD_LEVEL EQUAL 0 )
-   set( AUDACITY_SUFFIX "-alpha-${__TDATE__}" )
-elseif(  AUDACITY_BUILD_LEVEL EQUAL 1 )
-   set( AUDACITY_SUFFIX "-beta-${__TDATE__}" )
-else()
-   set( AUDACITY_SUFFIX "" )
-endif()
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-# Don't allow in-source builds...no real reason, just
-# keeping those source trees nice and tidy.  :-)
-# (This can be removed if it becomes an issue.)
-if( "${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}" )
-   message( FATAL_ERROR
-      "In-source builds not allowed.\n"
-      "Create a new directory and run cmake from there, i.e.:\n"
-      "  mkdir build\n"
-      "  cd build\n"
-      "  cmake ..\n"
-      "You will need to delete CMakeCache.txt and CMakeFiles from this directory to clean up."
-   )
-endif()
+###########################################
+# Muse Framework
+###########################################
+set(FETCHCONTENT_QUIET OFF)
+set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/_deps)
 
-# Just a couple of convenience variables
-set( topdir "${CMAKE_SOURCE_DIR}" )
-set( libsrc "${topdir}/lib-src" )
+set(MUSE_FRAMEWORK_PATH ${CMAKE_SOURCE_DIR}/muse)
+set(MUSE_FRAMEWORK_SRC_PATH ${MUSE_FRAMEWORK_PATH}/framework)
 
-# Default build type is Debug
-if( NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES )
-   set( CMAKE_BUILD_TYPE "Debug" )
-endif()
+set(CMAKE_MODULE_PATH
+    ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/buildscripts/cmake
+    ${MUSE_FRAMEWORK_PATH}/buildscripts/cmake
+    ${MUSE_FRAMEWORK_PATH}/framework/cmake
+    ${CMAKE_MODULE_PATH}
+    )
 
-# Ignore COMPILE_DEFINITIONS_<Config> properties
-cmake_policy( SET CMP0043 NEW )
+option(MUSE_MODULE_DOCKWINDOW_KDDOCKWIDGETS_V2 "Use KDDockWidgets v2" ON)
 
-# Link libraries by full path even in implicit directories.
-cmake_policy( SET CMP0060 NEW )
+include(${MUSE_FRAMEWORK_SRC_PATH}/cmake/MuseDeclareOptions.cmake)
+include(DeclareModuleSetup)
 
-# ``INTERPROCEDURAL_OPTIMIZATION`` is enforced when enabled.
-cmake_policy( SET CMP0069 NEW )
+###########################################
+# AudacityDependencies
+###########################################
+set(AUDACITY_ROOT ${CMAKE_CURRENT_LIST_DIR}/au3)
+add_definitions(-DINSTALL_PREFIX="${CMAKE_INSTALL_PREFIX}")
 
-# ``FindOpenGL`` prefers GLVND by default when available.
-cmake_policy( SET CMP0072 NEW )
+include(GetPlatformInfo)
 
-# Include file check macros honor ``CMAKE_REQUIRED_LIBRARIES``.
-cmake_policy( SET CMP0075 NEW )
+###########################################
+# Setup option and build settings
+###########################################
+include(GetPaths)
 
-# Definitions that must happen before the project() command
-if( APPLE )
+set(AU4_BUILD_CONFIGURATION "app" CACHE STRING "Build configuration")
+# Possible values:
+# - app             - for desktop app
+# - app-portable    - for desktop portable app (Windows build for PortableApps.com)
+# - utest           - for unit tests (for CI)
 
-   # Generate schema files
-   set( CMAKE_XCODE_GENERATE_SCHEME ON )
+set(AU4_BUILD_MODE "dev" CACHE STRING "Build mode")
+# Possible values:
+# - dev     - for development/nightly builds
+# - testing - for testing versions (alpha, beta, RC)
+# - release - for stable release builds
 
-   # Define the OSX compatibility parameters
-   set( CMAKE_OSX_ARCHITECTURES x86_64 CACHE INTERNAL "" )
-   set( CMAKE_OSX_DEPLOYMENT_TARGET 10.7 CACHE INTERNAL "" )
-   set( CMAKE_OSX_SYSROOT macosx CACHE INTERNAL "" )
-   set( CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "" CACHE INTERNAL "" )
+set(AU4_REVISION "" CACHE STRING "Build revision")
 
-   # This prevents a link error when building with the 10.9 or older SDKs
-   set( CMAKE_XCODE_ATTRIBUTE_CLANG_LINK_OBJC_RUNTIME OFF )
+# Modules (alphabetical order please)
+option(AU_BUILD_APPSHELL_MODULE "Build appshell module" ON)
+option(AU_BUILD_APPSHELL_TESTS "Build appshell tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_AU3AUDIO_TESTS "Build au3audio tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_AUTOMATION_TESTS "Build automation tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_CLOUD_AUDIOCOM "Build cloud audiocom module" ON)
+option(AU_BUILD_CONTEXT_TESTS "Build context tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_EFFECTS_MODULE "Build effects module" ON)
+option(AU_BUILD_EFFECTS_TESTS "Build effects tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_IMPORT_TESTS "Build import tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_EXPORT_TESTS "Build export tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_MUSEHUB_MODULE "Build Muse Hub module" ON)
+option(AU_BUILD_MACROMANAGER_TESTS "Build macromanager tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_PLAYBACK_MODULE "Build playback module" ON)
+option(AU_BUILD_PLAYBACK_TESTS "Build playback tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_PREFERENCES_TESTS "Build preferences tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_PROJECT_TESTS "Build project tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_PROJECTSCENE_MODULE "Build projectscene modules" ON)
+option(AU_BUILD_PROJECTSCENE_TESTS "Build projectscene tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_RECORD_MODULE "Build record module" ON)
+option(AU_BUILD_RECORD_TESTS "Build record tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_SHARED_TESTS "Build shared tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_TRACKEDIT_TESTS "Build trackedit tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_UICOMPONENTS_TESTS "Build uicomponents tests" ${MUSE_ENABLE_UNIT_TESTS})
+option(AU_BUILD_USAGEINFO_MODULE "Build usage info module" ON)
 
-   # Shouldn't cmake do this???
-   string( APPEND CMAKE_CXX_FLAGS " -stdlib=libc++" )
-endif()
+option(AU_MODULE_EFFECTS_VST "Build audacity vst module" ON)
+option(AU_MODULE_EFFECTS_NYQUIST "Build audacity nyquist module" ON)
 
-# Add our module path
-set( CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake-proxies/cmake-modules)
+if (OS_IS_LIN)
+    set(AU_BUILD_MUSEHUB_MODULE OFF CACHE BOOL "Build Muse Hub module" FORCE)
+    option(AU_MODULE_EFFECTS_LV2 "Build audacity lv2 module" ON)
+endif(OS_IS_LIN)
 
-# This "is a good thing" but greatly increases link time on Linux
-#set( CMAKE_INTERPROCEDURAL_OPTIMIZATION ON )
-#set( CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON )
-#set( CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF )
-
-# Set the required C++ standard
-set( CMAKE_CXX_STANDARD 14 )
-set( CMAKE_CXX_STANDARD_REQUIRED ON )
-
-# Use ccache if available
-find_program( CCACHE_PROGRAM ccache )
-mark_as_advanced( FORCE CCACHE_PROGRAM )
-
-if( CCACHE_PROGRAM )
-   set_property( GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}" )
-endif()
-
-# Our very own project
-project( Audacity )
-
-# Load our functions/macros
-include( AudacityFunctions )
-
-# Pull all the modules we'll need
-include( CheckCXXCompilerFlag )
-include( CheckIncludeFile )
-include( CheckIncludeFiles )
-include( CheckLibraryExists )
-include( CheckSymbolExists )
-include( CheckTypeSize )
-include( CMakeDependentOption )
-include( CMakeDetermineASM_NASMCompiler )
-include( CMakePushCheckState )
-include( GNUInstallDirs )
-include( TestBigEndian )
-
-# Determine 32-bit or 64-bit target
-if( CMAKE_C_COMPILER_ID MATCHES "MSVC" AND CMAKE_VS_PLATFORM_NAME MATCHES "Win64|x64" )
-   set( IS_64BIT ON )
-elseif( NOT CMAKE_SIZEOF_VOID_P STREQUAL "4" )
-   set( IS_64BIT ON )
-endif()
-
-message( STATUS "Build Info:" )
-message( STATUS "  Host System: ${CMAKE_HOST_SYSTEM}" )
-message( STATUS "  Host System Name: ${CMAKE_HOST_SYSTEM_NAME}" )
-message( STATUS "  Host System Processor: ${CMAKE_HOST_SYSTEM_PROCESSOR}" )
-message( STATUS "  Host System Version: ${CMAKE_HOST_SYSTEM_VERSION}" )
-
-if( IS_64BIT )
-   message( STATUS "  Host System Architecture: 64-bit" )
-else()
-   message( STATUS "  Host System Architecture: 32-bit" )
-endif()
-
-message( STATUS )
-message( STATUS "  Compiler: ${CMAKE_CXX_COMPILER}" )
-message( STATUS "  Compiler Version: ${CMAKE_CXX_COMPILER_VERSION}" )
-message( STATUS "  Compiler Standard: ${CMAKE_CXX_STANDARD}" )
-message( STATUS "  Compiler Standard Required: ${CMAKE_CXX_STANDARD_REQUIRED}" )
-message( STATUS "  Compiler Extensions: ${CMAKE_CXX_EXTENSIONS}" )
-message( STATUS )
-
-if( CMAKE_GENERATOR MATCHES "Visual Studio" )
-   message( STATUS "  MSVC Version: ${MSVC_VERSION}" )
-   message( STATUS "  MSVC Toolset: ${MSVC_TOOLSET_VERSION}" )
-   message( STATUS ) 
-elseif( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
-   if( CMAKE_GENERATOR MATCHES "Xcode" )
-      message( STATUS "  Xcode Version: ${XCODE_VERSION}" )
-   endif()
-   message( STATUS "  MacOS SDK: ${CMAKE_OSX_SYSROOT}" )
-   message( STATUS )
-endif()
-
-# Try to get the current commit information
-set( GIT_COMMIT_SHORT "unknown" )
-set( GIT_COMMIT_LONG "unknown" )
-set( GIT_COMMIT_TIME "unknown" )
-find_package( Git QUIET )
-if( GIT_FOUND )
-   execute_process(
-      COMMAND
-         ${GIT_EXECUTABLE} show -s "--format=%h;%H;%cd"
-      WORKING_DIRECTORY
-         ${topdir}
-      OUTPUT_VARIABLE
-         git_output
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-   )
-
-   if( git_output )
-      list( GET git_output 0 GIT_COMMIT_SHORT )
-      list( GET git_output 1 GIT_COMMIT_LONG )
-      list( GET git_output 2 GIT_COMMIT_TIME )
-   endif()
-endif()
-message( STATUS "  Current Commit: ${GIT_COMMIT_SHORT}" )
-message( STATUS )
-
-# Define option() prefix
-set( _OPT "audacity_" )
-
-# Organize subdirectories/targets into folders for the IDEs
-set_property( GLOBAL PROPERTY USE_FOLDERS ON )
-
-if( CMAKE_GENERATOR MATCHES "Visual Studio" )
-   # Make sure Audacity is the startup project
-   set_directory_properties(
-      PROPERTIES
-         VS_STARTUP_PROJECT "${CMAKE_PROJECT_NAME}"
-   )
-
-   # Build using multiple processors
-   foreach( config ${CMAKE_CONFIGURATION_TYPES} )
-      string( TOUPPER "${config}" config )
-      string( APPEND CMAKE_C_FLAGS_${config} " /MP" )
-      string( APPEND CMAKE_CXX_FLAGS_${config} " /MP" )
-   endforeach()
-
-   # Define system library information, but we'll do the install
-   set( CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP YES )
-   set( CMAKE_INSTALL_UCRT_LIBRARIES NO )
-   set( CMAKE_INSTALL_MFC_LIBRARIES NO )
-   set( CMAKE_INSTALL_OPENMP_LIBRARIES NO )
-   include( InstallRequiredSystemLibraries )
-endif()
-
-# Where the final product is stored
-set( CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin )
-
-# Define the non-install and executable paths
-if( CMAKE_CONFIGURATION_TYPES )
-   set( _DESTDIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${CMAKE_CFG_INTDIR}" )
-else()
-   set( _DESTDIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${CMAKE_BUILD_TYPE}" )
-endif()
-
-set( _DEST "${_DESTDIR}" )
-set( _PREFIX "${CMAKE_INSTALL_PREFIX}" )
-set( _LIBDIR "${CMAKE_INSTALL_LIBDIR}" )
-set( _DATADIR "${CMAKE_INSTALL_DATADIR}" )
-set( _PKGLIB "${_LIBDIR}/audacity" )
-set( _PKGDATA "${_DATADIR}/audacity/" )
-set( _MANDIR "${CMAKE_INSTALL_MANDIR}" )
-set( _MODDIR "${_DEST}/modules" )
-set( _EXEDIR "${_DEST}" )
-
-# Setup RPATH handling
-set( CMAKE_BUILD_RPATH "${_DEST}/${_PKGLIB}" )
-set( CMAKE_BUILD_WITH_INSTALL_RPATH FALSE )
-set( CMAKE_INSTALL_RPATH "${_PREFIX}/${_PKGLIB}" )
-set( CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE )
-
-# Adjust them for the Mac
 if( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
-   set( _APPDIR "Audacity.app/Contents" )
-   set( _DEST "${_DESTDIR}/${_APPDIR}" )
-   set( _EXEDIR "${_DEST}/MacOS" )
-   set( _MODDIR "${_DEST}/modules" )
-   set( _PKGLIB "${_DEST}/Frameworks" )
-
-   set( CMAKE_MACOSX_RPATH OFF )
+    option(AU_MODULE_EFFECTS_AUDIO_UNIT "Build Audacity Audio Unit module" ON)
 endif()
 
-# Add the math library (if found) to the list of required libraries
-check_library_exists( m pow "" HAVE_LIBM )
-if( HAVE_LIBM )
-   list( APPEND CMAKE_REQUIRED_LIBRARIES -lm )
+# Time-stretching and pitch-shifting libraries
+option(AU_USE_SBSMS "Build with SBSMS support for time-stretching effects" ON)
+option(AU_USE_SOUNDTOUCH "Build with SoundTouch support for pitch/tempo effects" ON)
+
+# Networking
+option(AU_USE_LIBCURL "Use libcurl for HTTP requests" OFF)
+
+# Time track
+option(AU_LOAD_TIMETRACK "Load time track from Audacity 3 projects" OFF)
+
+# Port mixer
+option(AU_USE_PORTMIXER "Use PortMixer for audio device management" ON)
+
+set(MUSE_MODULE_ACCESSIBILITY ON)
+set(MUSE_MODULE_ACTIONS ON)
+set(MUSE_MODULE_AUDIO OFF)
+set(MUSE_MODULE_AUDIOPLUGINS ON)
+set(MUSE_MODULE_CLOUD ${AU_BUILD_CLOUD_AUDIOCOM})
+set(MUSE_MODULE_CLOUD_MUSESCORECOM OFF CACHE BOOL "Enable MuseScore.com account" FORCE)
+set(MUSE_MODULE_DIAGNOSTICS ON)
+set(MUSE_MODULE_DRAW ON)
+set(MUSE_MODULE_DRAW_TESTS OFF)
+set(MUSE_MODULE_EXTENSIONS ON)
+set(MUSE_MODULE_GLOBAL ON)
+set(MUSE_MODULE_GLOBAL_TESTS OFF)
+set(MUSE_MODULE_LANGUAGES ON)
+set(MUSE_MODULE_LEARN OFF)
+set(MUSE_MODULE_MIDI OFF)
+set(MUSE_MODULE_MPE OFF)
+set(MUSE_MODULE_MULTIWINDOWS ON)
+set(MUSE_MODULE_MULTIWINDOWS_SINGLEPROC_MODE ON)
+set(MUSE_MODULE_MUSESAMPLER OFF)
+set(MUSE_MODULE_NETWORK ON)
+set(MUSE_MODULE_SHORTCUTS ON)
+set(MUSE_MODULE_SHORTCUTS_V2 ON)
+set(MUSE_MODULE_TESTFLOW ON)
+set(MUSE_MODULE_TOAST ON)
+set(MUSE_MODULE_UI ON)
+set(MUSE_MODULE_UI_TESTS OFF)
+set(MUSE_MODULE_WORKSPACE ON)
+set(MUSE_MODULE_VST ON)
+set(MUSE_MODULE_VST_QML ON)
+
+# Skip TestFlow in release builds
+if (AU4_BUILD_MODE STREQUAL "release")
+    set(MUSE_MODULE_TESTFLOW OFF)
 endif()
 
-check_library_exists( atomic __atomic_fetch_add_4 "" HAVE_LIBATOMIC )
-if( HAVE_LIBATOMIC )
-  list( APPEND CMAKE_REQUIRED_LIBRARIES -latomic )
-endif()
+# === Setup ===
 
-# Add the dynamic linker library (if needed) to the list of required libraries
-list( APPEND CMAKE_REQUIRED_LIBRARIES ${CMAKE_DL_LIBS} )
+# === Pack ===
+option(AU_RUN_LRELEASE "Generate .qm files" ON)
 
-# Make sure they're used during the link steps
-set( CMAKE_LINK_INTERFACE_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} )
+# === Tests ===
+set(APP_WORKSPACE_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/src/app/configs/workspaces.cfg")
+set(APP_BUILTIN_WORKSPACES_DIR "${CMAKE_CURRENT_LIST_DIR}/share/workspaces")
 
-# Various common checks whose results are used by the different targets
-test_big_endian( WORDS_BIGENDIAN )
+# === Compile ===
+option(MU_COMPILE_INSTALL_QTQML_FILES "Whether to bundle qml files along with the installation (relevant on MacOS only)" ON)
+option(MUSE_COMPILE_USE_UNITY "Use unity build." ON) # many AU4 modules still disable unity per-module; re-enabling is tracked in https://github.com/audacity/audacity/issues/11805
+option(MUSE_COMPILE_USE_CCACHE "Try use ccache" ON)
 
-# Check for compiler flags
-set( MMX_FLAG "" CACHE INTERNAL "" )
-set( SSE_FLAG "" CACHE INTERNAL "" )
-if( CMAKE_CXX_COMPILER_ID MATCHES "AppleClang|Clang|GNU" )
-   check_cxx_compiler_flag( "-mmmx" HAVE_MMX )
-   if( HAVE_MMX AND NOT IS_64BIT )
-      set( MMX_FLAG "-mmmx" CACHE INTERNAL "" )
-   endif()
+###########################################
+# Setup Configure
+###########################################
 
-   check_cxx_compiler_flag( "-msse" HAVE_SSE )
-   if( HAVE_SSE AND NOT IS_64BIT )
-      set( SSE_FLAG "-msse" CACHE INTERNAL "" )
-   endif()
+# default
+set(QT_ADD_LINGUISTTOOLS ON)
+set(QT_ADD_CONCURRENT ON)
+set(QT_QPROCESS_SUPPORTED ON)
 
-   check_cxx_compiler_flag( "-msse2" HAVE_SSE2 )
-   if( HAVE_SSE2 AND NOT IS_64BIT )
-      set( SSE_FLAG "-msse2" CACHE INTERNAL "" )
-   endif()
-elseif( CMAKE_CXX_COMPILER_ID MATCHES "MSVC" )
-   set( HAVE_MMX ON )
-   set( HAVE_SSE ON )
-   set( HAVE_SSE2 ON )
-   if( NOT IS_64BIT )
-      set( SSE_FLAG "/arch:SSE2" )
-   endif()
-endif()
-
-check_include_files( "float.h;stdarg.h;stdlib.h;string.h" STDC_HEADERS )
-
-check_include_file( "assert.h" HAVE_ASSERT_H )
-check_include_file( "errno.h" HAVE_ERRNO_H )
-check_include_file( "fcntl.h" HAVE_FCNTL_H )
-check_include_file( "fenv.h" HAVE_FENV_H )
-check_include_file( "inttypes.h" HAVE_INTTYPES_H )
-check_include_file( "limits.h" HAVE_LIMITS_H )
-if( CMAKE_SYSTEM_NAME MATCHES "FreeBSD" )
-  check_include_file( "stdlib.h" HAVE_MALLOC_H )
-  check_include_file( "sys/endian.h" HAVE_ENDIAN_H )
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/SetupConfigure.local.cmake")
+    include(${CMAKE_CURRENT_LIST_DIR}/SetupConfigure.local.cmake)
 else()
-  check_include_file( "malloc.h" HAVE_MALLOC_H )
-  check_include_file( "byteswap.h" HAVE_BYTESWAP_H )
-endif()
-check_include_file( "memory.h" HAVE_MEMORY_H )
-check_include_file( "stdbool.h" HAVE_STDBOOL_H )
-check_include_file( "stdint.h" HAVE_STDINT_H )
-check_include_file( "stdlib.h" HAVE_STDLIB_H )
-check_include_file( "string.h" HAVE_STRING_H )
-check_include_file( "strings.h" HAVE_STRINGS_H )
-check_include_file( "unistd.h" HAVE_UNISTD_H )
-check_include_file( "xmmintrin.h" HAVE_XMMINTRIN_H )
-check_include_file( "sys/param.h" HAVE_SYS_PARAM_H )
-check_include_file( "sys/stat.h" HAVE_SYS_STAT_H )
-check_include_file( "sys/types.h" HAVE_SYS_TYPES_H )
-check_include_file( "sys/wait.h" HAVE_SYS_WAIT_H )
-
-check_symbol_exists( bcopy "strings.h" HAVE_BCOPY )
-check_symbol_exists( fileno "stdio.h" HAVE_FILENO )
-check_symbol_exists( flock "sys/file.h" HAVE_FLOCK )
-check_symbol_exists( fork "unistd.h" HAVE_FORK )
-check_symbol_exists( fsync "unistd.h" HAVE_FSYNC )
-check_symbol_exists( ftruncate "unistd.h" HAVE_FTRUNCATE )
-check_symbol_exists( getpagesize "unistd.h" HAVE_GETPAGESIZE )
-check_symbol_exists( gettimeofday "sys/time.h" HAVE_GETTIMEOFDAY )
-check_symbol_exists( gmtime "time.h" HAVE_GMTIME )
-check_symbol_exists( gmtime_r "time.h" HAVE_GMTIME_R )
-check_symbol_exists( lrint "math.h" HAVE_LRINT )
-check_symbol_exists( lrintf "math.h" HAVE_LRINTF )
-check_symbol_exists( lround "math.h" HAVE_LROUND )
-check_symbol_exists( lstat "sys/stat.h" HAVE_LSTAT )
-check_symbol_exists( memcpy "string.h" HAVE_MEMCPY )
-check_symbol_exists( memmove "string.h" HAVE_MEMMOVE )
-check_symbol_exists( mlock "sys/mman.h" HAVE_MLOCK )
-check_symbol_exists( pipe "unistd.h" HAVE_PIPE )
-check_symbol_exists( posix_fadvise "fcntl.h" HAVE_POSIX_FADVISE )
-check_symbol_exists( posix_memalign "stdlib.h" HAVE_POSIX_MEMALIGN )
-check_symbol_exists( strchr "string.h" HAVE_STRCHR )
-check_symbol_exists( waitpid "sys/wait.h" HAVE_WAITPID )
-
-check_type_size( "int8_t" SIZEOF_INT8 LANGUAGE C )
-check_type_size( "int16_t" SIZEOF_INT16 LANGUAGE C )
-check_type_size( "uint16_t" SIZEOF_UINT16 LANGUAGE C )
-check_type_size( "u_int16_t" SIZEOF_U_INT16 LANGUAGE C )
-check_type_size( "int32_t" SIZEOF_INT32 LANGUAGE C )
-check_type_size( "uint32_t" SIZEOF_UINT32 LANGUAGE C )
-check_type_size( "u_int32_t" SIZEOF_U_INT32 LANGUAGE C )
-check_type_size( "int64_t" SIZEOF_INT64 LANGUAGE C )
-check_type_size( "short" SIZEOF_SHORT LANGUAGE C )
-check_type_size( "unsigned short" SIZEOF_UNSIGNED_SHORT LANGUAGE C )
-check_type_size( "int" SIZEOF_INT LANGUAGE C )
-check_type_size( "unsigned int" SIZEOF_UNSIGNED_INT LANGUAGE C )
-check_type_size( "long" SIZEOF_LONG LANGUAGE C )
-check_type_size( "unsigned long" SIZEOF_UNSIGNED_LONG LANGUAGE C )
-check_type_size( "long long" SIZEOF_LONG_LONG LANGUAGE C )
-check_type_size( "unsigned long long" SIZEOF_UNSIGNED_LONG_LONG LANGUAGE C )
-check_type_size( "float" SIZEOF_FLOAT LANGUAGE C )
-check_type_size( "double" SIZEOF_DOUBLE LANGUAGE C )
-check_type_size( "long double" SIZEOF_LONG_DOUBLE LANGUAGE C )
-check_type_size( "loff_t" SIZEOF_LOFF LANGUAGE C )
-check_type_size( "off_t" SIZEOF_OFF LANGUAGE C )
-check_type_size( "off64_t" SIZEOF_OFF64 LANGUAGE C )
-check_type_size( "size_t" SIZEOF_SIZE LANGUAGE C )
-check_type_size( "wchar_t" SIZEOF_WCHAR LANGUAGE C )
-check_type_size( "void*" SIZEOF_POINTER LANGUAGE C )
-
-# We'll be using it if it's available
-find_package( PkgConfig QUIET )
-
-# Mostly just to make the CMP0072 policy happy
-find_package( OpenGL QUIET )
-
-# Precreate the lib and lib64 directories so we can make then the same
-if( NOT EXISTS "${CMAKE_BINARY_DIR}/lib" )
-   file( MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/lib" )
+    include(SetupConfigure)
 endif()
 
-# Only create on systems that need it, effectively excluding Windows where links
-# may not work due to insufficient privileges
-if( NOT CMAKE_INSTALL_LIBDIR STREQUAL "lib" AND NOT EXISTS "${CMAKE_BINARY_DIR}/lib64" )
-   file( CREATE_LINK "${CMAKE_BINARY_DIR}/lib" "${CMAKE_BINARY_DIR}/lib64" SYMBOLIC )
+###########################################
+# Setup compiler and build environment
+###########################################
+
+include(SetupBuildEnvironment)
+include(GetPlatformInfo)
+include(SetupDevEnvironment)
+
+if (MUSE_COMPILE_USE_CCACHE)
+    include(SetupCompilerCache)
+endif(MUSE_COMPILE_USE_CCACHE)
+
+
+###########################################
+# Setup external dependencies
+###########################################
+set(QT_MIN_VERSION "6.2.4")
+include(SetupQt6)
+
+# This should be called after all options() are resolved
+include(SetupDependencies)
+
+###########################################
+# Add source tree
+###########################################
+if (MUSE_ENABLE_UNIT_TESTS)
+    enable_testing()
+    message(STATUS "Enabled testing")
 endif()
 
-# Define Audacity's name
-if( CMAKE_SYSTEM_NAME MATCHES "Darwin|Windows" )
-   set( AUDACITY_NAME "Audacity" )
-else()
-   set( AUDACITY_NAME "audacity" )
+add_subdirectory(${MUSE_FRAMEWORK_SRC_PATH})
+add_subdirectory(src)
+add_subdirectory(share)
+
+if (MSVC)
+    # Now that the `audacity` target is defined, we can set it as the startup project in Visual Studio.
+    set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT audacity)
 endif()
 
-# Create short and full version strings
-set( AUDACITY_DIST_VERSION ${AUDACITY_VERSION}.${AUDACITY_RELEASE}.${AUDACITY_REVISION} )
-set( AUDACITY_INFO_VERSION ${AUDACITY_VERSION}.${AUDACITY_RELEASE}.${AUDACITY_REVISION}.${AUDACITY_MODLEVEL} )
+###########################################
+# Setup Packaging
+###########################################
+if (OS_IS_LIN)
+    include(${CMAKE_CURRENT_LIST_DIR}/buildscripts/packaging/Linux+BSD/SetupAppImagePackaging.cmake)
+endif(OS_IS_LIN)
 
-# Python is used for the manual and (possibly) message catalogs
-find_package( Python3 )
-if( Python3_FOUND )
-   set( PYTHON "${Python3_EXECUTABLE}" )
-elseif( CMAKE_SYSTEM_NAME MATCHES "Windows" )
-   nuget_package( pkgdir "python3" "3.7.7" )
-   file( TO_NATIVE_PATH "${pkgdir}/tools/python.exe" PYTHON )
-endif()
-
-# define EXPERIMENTAL flags
-# Do this before consistency checks for added third-party libraries
-include( "src/Experimental.cmake" )
-
-# Add our children
-add_subdirectory( "cmake-proxies" )
-add_subdirectory( "help" )
-add_subdirectory( "images" )
-add_subdirectory( "libraries" )
-add_subdirectory( "locale" )
-add_subdirectory( "src" )
-add_subdirectory( "modules" )
-add_subdirectory( "nyquist" )
-add_subdirectory( "plug-ins" )
-add_subdirectory( "scripts" )
-
-# Generate config file
-if( CMAKE_SYSTEM_NAME MATCHES "Windows" )
-   configure_file( src/audacity_config.h.in src/private/configwin.h )
-elseif( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
-   set( HAVE_VISIBILITY 1 )
-   configure_file( src/audacity_config.h.in src/private/configmac.h )
-else()
-   set( HAVE_VISIBILITY 1 )
-   configure_file( src/audacity_config.h.in src/private/configunix.h )
-endif()
-
-# Generate a picture of module dependencies
-string( JOIN "\n" GRAPH_EDGES ${GRAPH_EDGES} )
-# Choose edge attributes making it easy to hover at either end of edge
-# and see a tooltip describing the edge, in svg image
-file( WRITE "${CMAKE_CURRENT_BINARY_DIR}/modules.dot" "digraph {
-   graph [rankdir=LR] edge [dir=both,arrowtail=inv] \n"
-   "${GRAPH_EDGES}"
-   "\n}\n"
-)
-execute_process( COMMAND
-   dot -O -Tsvg "${CMAKE_CURRENT_BINARY_DIR}/modules.dot" )
-
-# Uncomment what follows for symbol values.
-#[[
-   get_cmake_property( _variableNames VARIABLES )
-   foreach( _variableName ${_variableNames} )
-      message( STATUS "${_variableName}=${${_variableName}}" )
-   endforeach()
-#]]
-#[[
-   include( PrintProperties )
-   print_properties( TARGET "wxWidgets" )
-#]]
-
+if (OS_IS_WIN)
+    include(${CMAKE_CURRENT_LIST_DIR}/buildscripts/packaging/Windows/SetupWindowsPackaging.cmake)
+endif(OS_IS_WIN)
